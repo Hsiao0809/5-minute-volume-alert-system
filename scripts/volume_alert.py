@@ -1,10 +1,13 @@
 """
 5-minute volume breakout alert scanner.
 
-Universe : CoinGecko market-cap rank RANK_MIN..RANK_MAX, matched to Binance USDT spot pairs.
-Trigger  : latest closed 5m candle's quote volume > VOLUME_MULTIPLIER x the average volume of
-           the SAME 5-minute-of-day slot over the past HISTORY_DAYS days, AND the candle's close
-           price breaks above the high of the previous RANGE_LOOKBACK closed candles.
+Universe : CoinGecko market-cap rank RANK_MIN..RANK_MAX, matched to OKX USDT spot pairs.
+           (Binance's API returns HTTP 451 - blocked - for GitHub Actions runner IPs, so OKX
+           is used as the exchange data source instead.)
+Trigger  : latest closed 5m candle's quote-currency volume > VOLUME_MULTIPLIER x the average
+           volume of the SAME 5-minute-of-day slot over the past HISTORY_DAYS days, AND the
+           candle's close price breaks above the high of the previous RANGE_LOOKBACK closed
+           candles.
 State    : data/volume_history.json persists per-symbol, per-time-slot rolling volume history so
            each run only needs to fetch each symbol's most recent candles (cheap + fast), instead
            of re-downloading days of history every run.
@@ -31,7 +34,7 @@ MAX_WORKERS = 10
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "..", "data", "volume_history.json")
 
-BINANCE_BASE = "https://api.binance.com"
+OKX_BASE = "https://www.okx.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -72,25 +75,35 @@ def get_market_cap_universe():
     return ranked
 
 
-def get_binance_usdt_symbols():
-    r = SESSION.get(f"{BINANCE_BASE}/api/v3/exchangeInfo", timeout=20)
+def get_okx_usdt_instruments():
+    """Return set of live OKX spot instIds quoted in USDT, e.g. {'BTC-USDT', ...}."""
+    r = SESSION.get(
+        f"{OKX_BASE}/api/v5/public/instruments",
+        params={"instType": "SPOT"},
+        timeout=20,
+    )
     r.raise_for_status()
     data = r.json()
     return {
-        s["symbol"]
-        for s in data["symbols"]
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+        item["instId"]
+        for item in data.get("data", [])
+        if item.get("quoteCcy") == "USDT" and item.get("state") == "live"
     }
 
 
-def fetch_klines(symbol):
-    """Latest RANGE_LOOKBACK+2 candles (last one still forming). None on failure."""
-    limit = RANGE_LOOKBACK + 2
+def fetch_candles(inst_id):
+    """
+    Latest closed candle plus RANGE_LOOKBACK prior closed candles for inst_id, oldest-first.
+    Returns a list of RANGE_LOOKBACK+1 candles [open_time_ms, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+    or None on failure. OKX returns candles newest-first and the first one or two entries may still
+    be unconfirmed (still-forming), so we skip forward to the first confirmed candle.
+    """
+    limit = RANGE_LOOKBACK + 3
     for attempt in range(2):
         try:
             r = SESSION.get(
-                f"{BINANCE_BASE}/api/v3/klines",
-                params={"symbol": symbol, "interval": "5m", "limit": limit},
+                f"{OKX_BASE}/api/v5/market/candles",
+                params={"instId": inst_id, "bar": "5m", "limit": limit},
                 timeout=10,
             )
             if r.status_code == 429:
@@ -98,11 +111,22 @@ def fetch_klines(symbol):
                 continue
             if r.status_code != 200:
                 return None
-            data = r.json()
+            payload = r.json()
+            if payload.get("code") != "0":
+                return None
+            data = payload.get("data", [])
             if len(data) < limit:
                 return None
-            return data
-        except requests.RequestException:
+            # data[0] = newest; skip any still-forming (confirm == "0") candles
+            start = 0
+            while start < len(data) and data[start][8] == "0":
+                start += 1
+            closed = data[start:start + RANGE_LOOKBACK + 1]
+            if len(closed) < RANGE_LOOKBACK + 1:
+                return None
+            closed.reverse()  # oldest-first: closed[-1] is the latest closed candle
+            return closed
+        except (requests.RequestException, IndexError, ValueError):
             time.sleep(1)
     return None
 
@@ -146,15 +170,16 @@ def send_telegram(text):
 
 
 def process_symbol(symbol, meta, state):
-    klines = fetch_klines(symbol)
-    if not klines:
+    candles = fetch_candles(symbol)
+    if not candles:
         return None, None
 
-    latest_closed = klines[-2]
-    prev_range = klines[-(RANGE_LOOKBACK + 2):-2]
+    # oldest-first; last entry is the latest CLOSED candle, the rest are the range lookback
+    latest_closed = candles[-1]
+    prev_range = candles[:-1]
     open_time = int(latest_closed[0])
     close_price = float(latest_closed[4])
-    quote_volume = float(latest_closed[7])
+    quote_volume = float(latest_closed[6])  # volCcy: volume denominated in USDT
     range_high = max(float(c[2]) for c in prev_range)
 
     sym_state = state.get(symbol, {"slots": {}, "last_open_time": 0})
@@ -193,15 +218,15 @@ def main():
         print("Could not fetch market-cap universe from CoinGecko this run; skipping.")
         return
 
-    valid_symbols = get_binance_usdt_symbols()
+    valid_symbols = get_okx_usdt_instruments()
 
     targets = []
     for coin in universe:
-        sym = coin["symbol"] + "USDT"
+        sym = coin["symbol"] + "-USDT"
         if sym in valid_symbols:
             targets.append((sym, coin))
 
-    print(f"Scanning {len(targets)} symbols (CoinGecko rank {RANK_MIN}-{RANK_MAX}, matched on Binance USDT)")
+    print(f"Scanning {len(targets)} symbols (CoinGecko rank {RANK_MIN}-{RANK_MAX}, matched on OKX USDT)")
 
     state = load_state()
     alerts = []
