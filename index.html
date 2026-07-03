@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5分鐘成交量突破警報 — 監控狀態</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f5f6f8;
+    color: #1a1a1a;
+    padding: 24px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: #fff;
+    border: 1px solid #e3e5e8;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: #333; }
+  .status-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  }
+  .badge.ok { background: #e6f7ed; color: #1a7f4e; }
+  .badge.warn { background: #fff4e5; color: #b25e00; }
+  .badge.err { background: #fdeaea; color: #c53030; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.ok { background: #1a7f4e; }
+  .dot.warn { background: #b25e00; }
+  .dot.err { background: #c53030; }
+  .meta { color: #666; font-size: 13px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; }
+  th { color: #666; font-weight: 600; }
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .progress-outer {
+    background: #eee; border-radius: 6px; height: 10px; overflow: hidden; margin-top: 6px;
+  }
+  .progress-inner { height: 100%; background: #2563eb; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat-box { background: #fafbfc; border: 1px solid #eee; border-radius: 8px; padding: 12px; }
+  .stat-box .num { font-size: 22px; font-weight: 700; }
+  .stat-box .label { font-size: 12px; color: #666; margin-top: 2px; }
+  .refresh-btn {
+    border: 1px solid #d7dade; background: #fff; padding: 6px 14px; border-radius: 6px;
+    font-size: 13px; cursor: pointer; color: #333;
+  }
+  .refresh-btn:hover { background: #f5f6f8; }
+  .loading { color: #888; font-size: 13px; }
+  .foot { color: #999; font-size: 12px; text-align: center; margin-top: 20px; }
+  .config-list { font-size: 13px; color: #444; line-height: 1.8; }
+  .config-list code { background: #f1f2f4; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <div>
+      <h1>5分鐘成交量突破警報 — 監控狀態</h1>
+      <div class="subtitle">Hsiao0809/5-minute-volume-alert-system · 每 5 分鐘自動掃描 (GitHub Actions)</div>
+    </div>
+    <button class="refresh-btn" onclick="loadAll()">重新整理</button>
+  </div>
+
+  <div class="card">
+    <h2>運作狀態</h2>
+    <div id="statusArea" class="loading">讀取中…</div>
+  </div>
+
+  <div class="card">
+    <h2>最近執行紀錄</h2>
+    <div id="runsArea" class="loading">讀取中…</div>
+  </div>
+
+  <div class="card">
+    <h2>資料蒐集進度（7天同時段均值基準）</h2>
+    <div id="progressArea" class="loading">讀取中…</div>
+  </div>
+
+  <div class="card">
+    <h2>目前參數</h2>
+    <div class="config-list">
+      幣種池：市值排名 <code>200–500</code>（比對 OKX USDT 現貨交易對）<br>
+      觸發條件：現量 &gt; 過去7天同時段均值 <code>8</code> 倍，且現價突破近 <code>20</code> 根 5分K高點<br>
+      通知：Telegram Bot（觸發時發送）<br>
+      <a href="https://github.com/Hsiao0809/5-minute-volume-alert-system/blob/main/scripts/volume_alert.py" target="_blank">在 GitHub 上查看 / 調整腳本 →</a>
+    </div>
+  </div>
+
+  <div class="foot">頁面每次開啟即時讀取 GitHub 公開資料，不需登入。最後整理時間：<span id="loadedAt"></span></div>
+</div>
+
+<script>
+const REPO = "Hsiao0809/5-minute-volume-alert-system";
+const BRANCH = "main";
+const HISTORY_DAYS = 7;
+const MIN_HISTORY_SAMPLES = 3;
+
+function timeAgo(iso) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "剛剛";
+  if (mins < 60) return mins + " 分鐘前";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + " 小時前";
+  return Math.floor(hrs / 24) + " 天前";
+}
+
+function fmt(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString("zh-TW", { hour12: false });
+}
+
+async function loadRuns() {
+  const statusArea = document.getElementById("statusArea");
+  const runsArea = document.getElementById("runsArea");
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/actions/runs?per_page=10`, {
+      headers: { Accept: "application/vnd.github+json" }
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const runs = data.workflow_runs || [];
+
+    if (runs.length === 0) {
+      statusArea.innerHTML = `<span class="badge warn"><span class="dot warn"></span>尚無執行紀錄</span>`;
+      runsArea.innerHTML = "<div class='meta'>還沒有任何一次執行。</div>";
+      return;
+    }
+
+    const latest = runs[0];
+    const minsSinceLast = Math.floor((Date.now() - new Date(latest.created_at).getTime()) / 60000);
+    let statusHtml = "";
+    if (latest.status !== "completed") {
+      statusHtml = `<span class="badge warn"><span class="dot warn"></span>執行中…</span>`;
+    } else if (latest.conclusion === "success" && minsSinceLast <= 15) {
+      statusHtml = `<span class="badge ok"><span class="dot ok"></span>運作正常</span>`;
+    } else if (latest.conclusion === "success" && minsSinceLast > 15) {
+      statusHtml = `<span class="badge warn"><span class="dot warn"></span>上次成功，但已超過 15 分鐘沒有新執行，可能排程延遲或暫停</span>`;
+    } else {
+      statusHtml = `<span class="badge err"><span class="dot err"></span>上次執行失敗</span>`;
+    }
+
+    statusArea.innerHTML = `
+      <div class="status-row">${statusHtml}</div>
+      <div class="meta">最近一次執行：${fmt(latest.created_at)}（${timeAgo(latest.created_at)}） ·
+        <a href="${latest.html_url}" target="_blank">查看 log →</a>
+      </div>
+    `;
+
+    let rows = runs.map(r => {
+      const icon = r.status !== "completed" ? "🟡" : (r.conclusion === "success" ? "🟢" : "🔴");
+      return `<tr>
+        <td>${icon} #${r.run_number}</td>
+        <td>${fmt(r.created_at)}</td>
+        <td>${timeAgo(r.created_at)}</td>
+        <td>${r.conclusion || r.status}</td>
+        <td><a href="${r.html_url}" target="_blank">log</a></td>
+      </tr>`;
+    }).join("");
+
+    runsArea.innerHTML = `
+      <table>
+        <thead><tr><th>Run</th><th>時間</th><th>距今</th><th>結果</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  } catch (e) {
+    statusArea.innerHTML = `<span class="badge err"><span class="dot err"></span>讀取失敗：${e.message}</span>`;
+    runsArea.innerHTML = "<div class='meta'>無法讀取 GitHub Actions 紀錄，可能是暫時的 API 限流，稍後重新整理看看。</div>";
+  }
+}
+
+async function loadProgress() {
+  const el = document.getElementById("progressArea");
+  try {
+    const url = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/data/volume_history.json?t=${Date.now()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const symbols = Object.keys(data);
+    const totalSymbols = symbols.length;
+
+    let readyCount = 0;
+    let fullCount = 0;
+    let latestOpenTime = 0;
+
+    symbols.forEach(sym => {
+      const s = data[sym];
+      if (s.last_open_time > latestOpenTime) latestOpenTime = s.last_open_time;
+      const slotLens = Object.values(s.slots || {}).map(arr => arr.length);
+      const maxLen = slotLens.length ? Math.max(...slotLens) : 0;
+      if (maxLen >= MIN_HISTORY_SAMPLES) readyCount++;
+      if (maxLen >= HISTORY_DAYS) fullCount++;
+    });
+
+    const readyPct = totalSymbols ? Math.round((readyCount / totalSymbols) * 100) : 0;
+    const fullPct = totalSymbols ? Math.round((fullCount / totalSymbols) * 100) : 0;
+    const lastUpdate = latestOpenTime ? new Date(latestOpenTime).toLocaleString("zh-TW", { hour12: false }) : "—";
+
+    el.innerHTML = `
+      <div class="stat-grid">
+        <div class="stat-box"><div class="num">${totalSymbols}</div><div class="label">追蹤幣種數</div></div>
+        <div class="stat-box"><div class="num">${readyCount}</div><div class="label">已可判斷觸發（≥3天）</div></div>
+        <div class="stat-box"><div class="num">${fullCount}</div><div class="label">完整7天基準</div></div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="meta">已可判斷觸發比例：${readyPct}%</div>
+        <div class="progress-outer"><div class="progress-inner" style="width:${readyPct}%"></div></div>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="meta">完整7天基準比例：${fullPct}%</div>
+        <div class="progress-outer"><div class="progress-inner" style="width:${fullPct}%; background:#1a7f4e;"></div></div>
+      </div>
+      <div class="meta" style="margin-top:10px;">資料最後更新：${lastUpdate}</div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="meta">無法讀取資料檔（可能還沒有任何一次成功執行）：${e.message}</div>`;
+  }
+}
+
+async function loadAll() {
+  document.getElementById("statusArea").innerHTML = "<span class='loading'>讀取中…</span>";
+  document.getElementById("runsArea").innerHTML = "<span class='loading'>讀取中…</span>";
+  document.getElementById("progressArea").innerHTML = "<span class='loading'>讀取中…</span>";
+  await Promise.all([loadRuns(), loadProgress()]);
+  document.getElementById("loadedAt").textContent = new Date().toLocaleString("zh-TW", { hour12: false });
+}
+
+loadAll();
+setInterval(loadAll, 60000); // auto-refresh every 60s while page is open
+</script>
+</body>
+</html>
