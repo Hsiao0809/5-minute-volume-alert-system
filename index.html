@@ -5,61 +5,73 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>5分鐘成交量突破警報 — 監控狀態</title>
 <style>
-  :root { color-scheme: light; }
+  :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background: #f5f6f8;
-    color: #1a1a1a;
+    background: #0d1117;
+    color: #c9d1d9;
     padding: 24px;
   }
-  .wrap { max-width: 920px; margin: 0 auto; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; color: #f0f6fc; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 20px; }
   .card {
-    background: #fff;
-    border: 1px solid #e3e5e8;
+    background: #161b22;
+    border: 1px solid #30363d;
     border-radius: 10px;
     padding: 18px 20px;
     margin-bottom: 16px;
   }
-  .card h2 { font-size: 15px; margin: 0 0 12px; color: #333; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: #e6edf3; }
   .status-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .badge {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
   }
-  .badge.ok { background: #e6f7ed; color: #1a7f4e; }
-  .badge.warn { background: #fff4e5; color: #b25e00; }
-  .badge.err { background: #fdeaea; color: #c53030; }
+  .badge.ok { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .badge.warn { background: rgba(210,153,34,0.15); color: #d29922; }
+  .badge.err { background: rgba(248,81,73,0.15); color: #f85149; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot.ok { background: #1a7f4e; }
-  .dot.warn { background: #b25e00; }
-  .dot.err { background: #c53030; }
-  .meta { color: #666; font-size: 13px; margin-top: 8px; }
+  .dot.ok { background: #3fb950; }
+  .dot.warn { background: #d29922; }
+  .dot.err { background: #f85149; }
+  .meta { color: #8b949e; font-size: 13px; margin-top: 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; }
-  th { color: #666; font-weight: 600; }
-  a { color: #2563eb; text-decoration: none; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 600; position: sticky; top: 0; background: #161b22; }
+  a { color: #58a6ff; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .progress-outer {
-    background: #eee; border-radius: 6px; height: 10px; overflow: hidden; margin-top: 6px;
+    background: #21262d; border-radius: 6px; height: 10px; overflow: hidden; margin-top: 6px;
   }
-  .progress-inner { height: 100%; background: #2563eb; }
+  .progress-inner { height: 100%; background: #58a6ff; }
+  .mini-bar-outer {
+    background: #21262d; border-radius: 4px; height: 6px; width: 60px; overflow: hidden; display: inline-block; vertical-align: middle;
+  }
+  .mini-bar-inner { height: 100%; background: #3fb950; }
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .stat-box { background: #fafbfc; border: 1px solid #eee; border-radius: 8px; padding: 12px; }
-  .stat-box .num { font-size: 22px; font-weight: 700; }
-  .stat-box .label { font-size: 12px; color: #666; margin-top: 2px; }
+  .stat-box { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+  .stat-box .num { font-size: 22px; font-weight: 700; color: #f0f6fc; }
+  .stat-box .label { font-size: 12px; color: #8b949e; margin-top: 2px; }
   .refresh-btn {
-    border: 1px solid #d7dade; background: #fff; padding: 6px 14px; border-radius: 6px;
-    font-size: 13px; cursor: pointer; color: #333;
+    border: 1px solid #30363d; background: #21262d; padding: 6px 14px; border-radius: 6px;
+    font-size: 13px; cursor: pointer; color: #c9d1d9;
   }
-  .refresh-btn:hover { background: #f5f6f8; }
-  .loading { color: #888; font-size: 13px; }
-  .foot { color: #999; font-size: 12px; text-align: center; margin-top: 20px; }
-  .config-list { font-size: 13px; color: #444; line-height: 1.8; }
-  .config-list code { background: #f1f2f4; padding: 1px 6px; border-radius: 4px; }
+  .refresh-btn:hover { background: #30363d; }
+  .loading { color: #8b949e; font-size: 13px; }
+  .foot { color: #6e7681; font-size: 12px; text-align: center; margin-top: 20px; }
+  .config-list { font-size: 13px; color: #c9d1d9; line-height: 1.8; }
+  .config-list code { background: #21262d; padding: 1px 6px; border-radius: 4px; color: #e6edf3; }
+  .search-input {
+    background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px;
+    padding: 6px 10px; font-size: 13px; width: 200px;
+  }
+  .table-scroll { max-height: 480px; overflow-y: auto; }
+  .ready-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .ready-badge.yes { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .ready-badge.no { background: rgba(139,148,158,0.15); color: #8b949e; }
 </style>
 </head>
 <body>
@@ -88,6 +100,14 @@
   </div>
 
   <div class="card">
+    <h2 style="display:flex; align-items:center; justify-content:space-between;">
+      <span>符合條件的幣種（市值排名 200–500，且在 OKX 有 USDT 交易對）</span>
+      <input class="search-input" id="coinFilter" placeholder="搜尋幣種…" oninput="renderCoinTable()">
+    </h2>
+    <div id="coinsArea" class="loading">讀取中…</div>
+  </div>
+
+  <div class="card">
     <h2>目前參數</h2>
     <div class="config-list">
       幣種池：市值排名 <code>200–500</code>（比對 OKX USDT 現貨交易對）<br>
@@ -105,6 +125,8 @@ const REPO = "Hsiao0809/5-minute-volume-alert-system";
 const BRANCH = "main";
 const HISTORY_DAYS = 7;
 const MIN_HISTORY_SAMPLES = 3;
+
+let coinRows = [];
 
 function timeAgo(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -181,6 +203,44 @@ async function loadRuns() {
   }
 }
 
+function renderCoinTable() {
+  const el = document.getElementById("coinsArea");
+  if (!coinRows.length) {
+    el.innerHTML = "<div class='meta'>目前沒有符合條件的幣種資料。</div>";
+    return;
+  }
+  const filterVal = (document.getElementById("coinFilter").value || "").trim().toUpperCase();
+  const filtered = filterVal
+    ? coinRows.filter(c => c.symbol.includes(filterVal) || (c.name || "").toUpperCase().includes(filterVal))
+    : coinRows;
+
+  const rowsHtml = filtered.map(c => {
+    const pct = Math.min(100, Math.round((c.days / HISTORY_DAYS) * 100));
+    const ready = c.days >= MIN_HISTORY_SAMPLES;
+    return `<tr>
+      <td>${c.rank ?? "—"}</td>
+      <td><b>${c.symbol}</b></td>
+      <td>${c.name || "—"}</td>
+      <td>
+        <span class="mini-bar-outer"><span class="mini-bar-inner" style="width:${pct}%"></span></span>
+        <span style="margin-left:6px; color:#8b949e;">${c.days}/${HISTORY_DAYS} 天</span>
+      </td>
+      <td><span class="ready-badge ${ready ? "yes" : "no"}">${ready ? "可判斷觸發" : "蒐集中"}</span></td>
+      <td class="meta">${c.lastUpdate}</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="meta" style="margin-bottom:8px;">共 ${coinRows.length} 支幣種${filterVal ? `，符合「${filterVal}」篩選 ${filtered.length} 支` : ""}</div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>排名</th><th>幣種</th><th>名稱</th><th>資料蒐集進度</th><th>狀態</th><th>最後更新</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function loadProgress() {
   const el = document.getElementById("progressArea");
   try {
@@ -194,6 +254,7 @@ async function loadProgress() {
     let readyCount = 0;
     let fullCount = 0;
     let latestOpenTime = 0;
+    coinRows = [];
 
     symbols.forEach(sym => {
       const s = data[sym];
@@ -202,7 +263,16 @@ async function loadProgress() {
       const maxLen = slotLens.length ? Math.max(...slotLens) : 0;
       if (maxLen >= MIN_HISTORY_SAMPLES) readyCount++;
       if (maxLen >= HISTORY_DAYS) fullCount++;
+      coinRows.push({
+        symbol: sym,
+        name: s.name || "",
+        rank: s.rank ?? null,
+        days: maxLen,
+        lastUpdate: s.last_open_time ? new Date(s.last_open_time).toLocaleString("zh-TW", { hour12: false }) : "—"
+      });
     });
+
+    coinRows.sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
 
     const readyPct = totalSymbols ? Math.round((readyCount / totalSymbols) * 100) : 0;
     const fullPct = totalSymbols ? Math.round((fullCount / totalSymbols) * 100) : 0;
@@ -220,12 +290,15 @@ async function loadProgress() {
       </div>
       <div style="margin-top:10px;">
         <div class="meta">完整7天基準比例：${fullPct}%</div>
-        <div class="progress-outer"><div class="progress-inner" style="width:${fullPct}%; background:#1a7f4e;"></div></div>
+        <div class="progress-outer"><div class="progress-inner" style="width:${fullPct}%; background:#3fb950;"></div></div>
       </div>
       <div class="meta" style="margin-top:10px;">資料最後更新：${lastUpdate}</div>
     `;
+
+    renderCoinTable();
   } catch (e) {
     el.innerHTML = `<div class="meta">無法讀取資料檔（可能還沒有任何一次成功執行）：${e.message}</div>`;
+    document.getElementById("coinsArea").innerHTML = `<div class="meta">無法讀取幣種清單：${e.message}</div>`;
   }
 }
 
@@ -233,6 +306,7 @@ async function loadAll() {
   document.getElementById("statusArea").innerHTML = "<span class='loading'>讀取中…</span>";
   document.getElementById("runsArea").innerHTML = "<span class='loading'>讀取中…</span>";
   document.getElementById("progressArea").innerHTML = "<span class='loading'>讀取中…</span>";
+  document.getElementById("coinsArea").innerHTML = "<span class='loading'>讀取中…</span>";
   await Promise.all([loadRuns(), loadProgress()]);
   document.getElementById("loadedAt").textContent = new Date().toLocaleString("zh-TW", { hour12: false });
 }
