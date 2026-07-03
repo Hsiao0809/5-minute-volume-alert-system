@@ -183,6 +183,8 @@ def process_symbol(symbol, meta, state):
     range_high = max(float(c[2]) for c in prev_range)
 
     sym_state = state.get(symbol, {"slots": {}, "last_open_time": 0})
+    sym_state["name"] = meta["name"]
+    sym_state["rank"] = meta["rank"]
     slot = str(slot_index(open_time))
 
     already_seen = open_time <= sym_state.get("last_open_time", 0)
