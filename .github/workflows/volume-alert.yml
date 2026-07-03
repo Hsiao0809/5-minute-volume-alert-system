@@ -1,0 +1,44 @@
+name: 5m Volume Breakout Alert
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: volume-alert
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run volume scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/volume_alert.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "volume-alert-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/volume_history.json
+          git diff --cached --quiet || git commit -m "chore: update volume history [skip ci]"
+          git pull --rebase --autostash
+          git push
