@@ -18,6 +18,7 @@ import os
 import json
 import time
 import statistics
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -30,9 +31,11 @@ RANGE_LOOKBACK = 20          # number of prior closed 5m candles used for breako
 HISTORY_DAYS = 7             # days of same-time-slot history kept for the baseline average
 MIN_HISTORY_SAMPLES = 3      # need at least this many days of data before alerting on a slot
 MAX_WORKERS = 10
+MAX_ALERTS_KEPT = 300        # cap on how many past alerts are kept in the history file
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "..", "data", "volume_history.json")
+ALERTS_FILE = os.path.join(BASE_DIR, "..", "data", "alerts_history.json")
 
 OKX_BASE = "https://www.okx.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
@@ -152,6 +155,24 @@ def save_state(state):
         json.dump(state, f)
 
 
+def load_alerts_history():
+    if os.path.exists(ALERTS_FILE):
+        try:
+            with open(ALERTS_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return []
+    return []
+
+
+def save_alerts_history(history):
+    os.makedirs(os.path.dirname(ALERTS_FILE), exist_ok=True)
+    # newest first, capped
+    trimmed = history[-MAX_ALERTS_KEPT:] if len(history) > MAX_ALERTS_KEPT else history
+    with open(ALERTS_FILE, "w") as f:
+        json.dump(trimmed, f)
+
+
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials not set; would have sent:\n" + text)
@@ -203,6 +224,7 @@ def process_symbol(symbol, meta, state):
                 "ratio": quote_volume / avg_vol,
                 "close": close_price,
                 "range_high": range_high,
+                "candle_time": datetime.fromtimestamp(open_time / 1000, tz=timezone.utc).isoformat(),
             }
 
     if not already_seen:
@@ -255,6 +277,23 @@ def main():
             )
         send_telegram("\n".join(lines))
         print(f"Sent alert for {len(alerts)} symbol(s).")
+
+        detected_at = datetime.now(timezone.utc).isoformat()
+        alerts_history = load_alerts_history()
+        for a in sorted(alerts, key=lambda x: -x["ratio"]):
+            alerts_history.append({
+                "detected_at": detected_at,
+                "candle_time": a["candle_time"],
+                "symbol": a["symbol"],
+                "name": a["name"],
+                "rank": a["rank"],
+                "volume": a["volume"],
+                "avg_volume": a["avg_volume"],
+                "ratio": a["ratio"],
+                "close": a["close"],
+                "range_high": a["range_high"],
+            })
+        save_alerts_history(alerts_history)
     else:
         print("No alerts this run.")
 
