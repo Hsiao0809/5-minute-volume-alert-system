@@ -100,6 +100,11 @@
   </div>
 
   <div class="card">
+    <h2>通知紀錄</h2>
+    <div id="alertsArea" class="loading">讀取中…</div>
+  </div>
+
+  <div class="card">
     <h2 style="display:flex; align-items:center; justify-content:space-between;">
       <span>符合條件的幣種（市值排名 200–500，且在 OKX 有 USDT 交易對）</span>
       <input class="search-input" id="coinFilter" placeholder="搜尋幣種…" oninput="renderCoinTable()">
@@ -241,6 +246,41 @@ function renderCoinTable() {
   `;
 }
 
+async function loadAlerts() {
+  const el = document.getElementById("alertsArea");
+  try {
+    const url = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/data/alerts_history.json?t=${Date.now()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+
+    if (!data.length) {
+      el.innerHTML = "<div class='meta'>目前還沒有觸發過警報（資料蒐集中，通常需要 3-7 天才會開始判斷）。</div>";
+      return;
+    }
+
+    const sorted = [...data].sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
+    const rows = sorted.map(a => `<tr>
+      <td>${fmt(a.detected_at)}<div class="meta">${timeAgo(a.detected_at)}</div></td>
+      <td>#${a.rank ?? "—"} <b>${a.symbol}</b><div class="meta">${a.name || ""}</div></td>
+      <td><b>${a.ratio.toFixed(1)}x</b><div class="meta">現量 ${Math.round(a.volume).toLocaleString()} / 均量 ${Math.round(a.avg_volume).toLocaleString()}</div></td>
+      <td>${a.close}<div class="meta">突破 ${a.range_high}</div></td>
+    </tr>`).join("");
+
+    el.innerHTML = `
+      <div class="meta" style="margin-bottom:8px;">共 ${data.length} 筆通知紀錄（最多保留最近 300 筆）</div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>觸發時間</th><th>幣種</th><th>量比</th><th>價格</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="meta">無法讀取通知紀錄：${e.message}</div>`;
+  }
+}
+
 async function loadProgress() {
   const el = document.getElementById("progressArea");
   try {
@@ -307,7 +347,8 @@ async function loadAll() {
   document.getElementById("runsArea").innerHTML = "<span class='loading'>讀取中…</span>";
   document.getElementById("progressArea").innerHTML = "<span class='loading'>讀取中…</span>";
   document.getElementById("coinsArea").innerHTML = "<span class='loading'>讀取中…</span>";
-  await Promise.all([loadRuns(), loadProgress()]);
+  document.getElementById("alertsArea").innerHTML = "<span class='loading'>讀取中…</span>";
+  await Promise.all([loadRuns(), loadProgress(), loadAlerts()]);
   document.getElementById("loadedAt").textContent = new Date().toLocaleString("zh-TW", { hour12: false });
 }
 
