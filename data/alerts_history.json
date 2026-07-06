@@ -1,1 +1,1 @@
-[]
+[{"detected_at": "2026-07-06T17:43:41.692026+00:00", "candle_time": "2026-07-06T17:35:00+00:00", "symbol": "NMR-USDT", "name": "Numeraire", "rank": 358, "volume": 8911.234236215, "avg_volume": 116.12150194933334, "ratio": 76.7406043378873, "close": 9.725, "range_high": 9.7}, {"detected_at": "2026-07-06T17:43:41.692026+00:00", "candle_time": "2026-07-06T17:35:00+00:00", "symbol": "ZAMA-USDT", "name": "Zama", "rank": 333, "volume": 9301.236882, "avg_volume": 302.53002499999997, "ratio": 30.744838903179943, "close": 0.03415, "range_high": 0.03388}]
