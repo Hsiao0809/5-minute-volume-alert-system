@@ -116,7 +116,8 @@
     <h2>目前參數</h2>
     <div class="config-list">
       幣種池：市值排名 <code>200–500</code>（比對 OKX USDT 現貨交易對）<br>
-      觸發條件：現量 &gt; 過去7天同時段均值 <code>8</code> 倍，且現價突破近 <code>20</code> 根 5分K高點<br>
+      觸發條件：現量 &gt; 過去7天同時段均值 <code>15</code> 倍，且現量 &gt; <code>3,000</code> USDT（絕對量下限，避免冷門幣雜訊觸發），且現價突破近 <code>20</code> 根 5分K高點<br>
+      基準樣本：需至少 <code>5</code> 天同時段歷史資料才開始判斷<br>
       通知：Telegram Bot（觸發時發送）<br>
       <a href="https://github.com/Hsiao0809/5-minute-volume-alert-system/blob/main/scripts/volume_alert.py" target="_blank">在 GitHub 上查看 / 調整腳本 →</a>
     </div>
@@ -129,7 +130,7 @@
 const REPO = "Hsiao0809/5-minute-volume-alert-system";
 const BRANCH = "main";
 const HISTORY_DAYS = 7;
-const MIN_HISTORY_SAMPLES = 3;
+const MIN_HISTORY_SAMPLES = 5;
 
 let coinRows = [];
 
