@@ -262,32 +262,18 @@ async function loadAlerts() {
     }
 
     const sorted = [...data].sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
+    let skipped = 0;
     const rows = sorted.map(a => {
-      let typeHtml, detailHtml, priceHtml;
-      if (a.type === "bullish_divergence") {
-        typeHtml = `<span class="badge ok" style="font-size:12px;">📈 底背離</span>`;
-        detailHtml = `價 ${a.price1} → ${a.price2} 創新低<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走高</div>`;
-        priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
-      } else if (a.type === "bearish_divergence") {
-        typeHtml = `<span class="badge err" style="font-size:12px;">📉 頂背離</span>`;
-        detailHtml = `價 ${a.price1} → ${a.price2} 創新高<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走低</div>`;
-        priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
-      } else {
-        typeHtml = `<span class="badge warn" style="font-size:12px;">🚨 爆量突破</span>`;
-        detailHtml = `<b>${a.ratio.toFixed(1)}x</b><div class="meta">現量 ${Math.round(a.volume).toLocaleString()} / 均量 ${Math.round(a.avg_volume).toLocaleString()}</div>`;
-        priceHtml = `${a.close}<div class="meta">突破 ${a.range_high}</div>`;
+      try {
+        return renderAlertRow(a);
+      } catch (err) {
+        // a single record with an unexpected shape must not take down the whole table
+        skipped++;
+        return "";
       }
-      return `<tr>
-        <td>${fmt(a.detected_at)}<div class="meta">${timeAgo(a.detected_at)}</div></td>
-        <td>#${a.rank ?? "—"} <b>${a.symbol}</b><div class="meta">${a.name || ""}</div></td>
-        <td>${typeHtml}</td>
-        <td>${detailHtml}</td>
-        <td>${priceHtml}</td>
-      </tr>`;
     }).join("");
-
     el.innerHTML = `
-      <div class="meta" style="margin-bottom:8px;">共 ${data.length} 筆通知紀錄（最多保留最近 300 筆）</div>
+      <div class="meta" style="margin-bottom:8px;">共 ${data.length} 筆通知紀錄（最多保留最近 300 筆）${skipped ? `，${skipped} 筆格式不支援已略過` : ""}</div>
       <div class="table-scroll">
         <table>
           <thead><tr><th>觸發時間</th><th>幣種</th><th>類型</th><th>訊號內容</th><th>價格</th></tr></thead>
@@ -298,6 +284,35 @@ async function loadAlerts() {
   } catch (e) {
     el.innerHTML = `<div class="meta">無法讀取通知紀錄：${e.message}</div>`;
   }
+}
+
+function renderAlertRow(a) {
+  let typeHtml, detailHtml, priceHtml;
+  if (a.type === "bullish_divergence") {
+    typeHtml = `<span class="badge ok" style="font-size:12px;">📈 底背離</span>`;
+    detailHtml = `價 ${a.price1} → ${a.price2} 創新低<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走高</div>`;
+    priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
+  } else if (a.type === "bearish_divergence") {
+    typeHtml = `<span class="badge err" style="font-size:12px;">📉 頂背離</span>`;
+    detailHtml = `價 ${a.price1} → ${a.price2} 創新高<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走低</div>`;
+    priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
+  } else if (a.ratio != null) {
+    typeHtml = `<span class="badge warn" style="font-size:12px;">🚨 爆量突破</span>`;
+    detailHtml = `<b>${a.ratio.toFixed(1)}x</b><div class="meta">現量 ${Math.round(a.volume).toLocaleString()} / 均量 ${Math.round(a.avg_volume).toLocaleString()}</div>`;
+    priceHtml = `${a.close}<div class="meta">突破 ${a.range_high}</div>`;
+  } else {
+    // future/unknown record shape: still show the row instead of dying
+    typeHtml = `<span class="badge warn" style="font-size:12px;">${a.type || "未知類型"}</span>`;
+    detailHtml = `<span class="meta">此頁面版本不支援的紀錄格式</span>`;
+    priceHtml = `${a.close ?? "—"}`;
+  }
+  return `<tr>
+    <td>${fmt(a.detected_at)}<div class="meta">${timeAgo(a.detected_at)}</div></td>
+    <td>#${a.rank ?? "—"} <b>${a.symbol}</b><div class="meta">${a.name || ""}</div></td>
+    <td>${typeHtml}</td>
+    <td>${detailHtml}</td>
+    <td>${priceHtml}</td>
+  </tr>`;
 }
 
 async function loadProgress() {
