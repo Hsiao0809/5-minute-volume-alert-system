@@ -118,6 +118,7 @@
       幣種池：市值排名 <code>200–500</code>（比對 OKX USDT 現貨交易對）<br>
       觸發條件：現量 &gt; 過去7天同時段均值 <code>15</code> 倍，且現量 &gt; <code>3,000</code> USDT（絕對量下限，避免冷門幣雜訊觸發），且現價突破近 <code>20</code> 根 5分K高點<br>
       基準樣本：需至少 <code>5</code> 天同時段歷史資料才開始判斷<br>
+      RSI 背離：RSI(<code>14</code>) 搭配左右各 <code>2</code> 根K確認的轉折點；底背離需前一低點 RSI &lt; <code>40</code>、頂背離需前一高點 RSI &gt; <code>60</code>，兩轉折點相隔 <code>5–40</code> 根5分K<br>
       通知：Telegram Bot（觸發時發送）<br>
       <a href="https://github.com/Hsiao0809/5-minute-volume-alert-system/blob/main/scripts/volume_alert.py" target="_blank">在 GitHub 上查看 / 調整腳本 →</a>
     </div>
@@ -261,18 +262,35 @@ async function loadAlerts() {
     }
 
     const sorted = [...data].sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
-    const rows = sorted.map(a => `<tr>
-      <td>${fmt(a.detected_at)}<div class="meta">${timeAgo(a.detected_at)}</div></td>
-      <td>#${a.rank ?? "—"} <b>${a.symbol}</b><div class="meta">${a.name || ""}</div></td>
-      <td><b>${a.ratio.toFixed(1)}x</b><div class="meta">現量 ${Math.round(a.volume).toLocaleString()} / 均量 ${Math.round(a.avg_volume).toLocaleString()}</div></td>
-      <td>${a.close}<div class="meta">突破 ${a.range_high}</div></td>
-    </tr>`).join("");
+    const rows = sorted.map(a => {
+      let typeHtml, detailHtml, priceHtml;
+      if (a.type === "bullish_divergence") {
+        typeHtml = `<span class="badge ok" style="font-size:12px;">📈 底背離</span>`;
+        detailHtml = `價 ${a.price1} → ${a.price2} 創新低<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走高</div>`;
+        priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
+      } else if (a.type === "bearish_divergence") {
+        typeHtml = `<span class="badge err" style="font-size:12px;">📉 頂背離</span>`;
+        detailHtml = `價 ${a.price1} → ${a.price2} 創新高<div class="meta">RSI ${a.rsi1.toFixed(1)} → ${a.rsi2.toFixed(1)} 走低</div>`;
+        priceHtml = `${a.close}<div class="meta">轉折相隔 ${a.gap_candles} 根K</div>`;
+      } else {
+        typeHtml = `<span class="badge warn" style="font-size:12px;">🚨 爆量突破</span>`;
+        detailHtml = `<b>${a.ratio.toFixed(1)}x</b><div class="meta">現量 ${Math.round(a.volume).toLocaleString()} / 均量 ${Math.round(a.avg_volume).toLocaleString()}</div>`;
+        priceHtml = `${a.close}<div class="meta">突破 ${a.range_high}</div>`;
+      }
+      return `<tr>
+        <td>${fmt(a.detected_at)}<div class="meta">${timeAgo(a.detected_at)}</div></td>
+        <td>#${a.rank ?? "—"} <b>${a.symbol}</b><div class="meta">${a.name || ""}</div></td>
+        <td>${typeHtml}</td>
+        <td>${detailHtml}</td>
+        <td>${priceHtml}</td>
+      </tr>`;
+    }).join("");
 
     el.innerHTML = `
       <div class="meta" style="margin-bottom:8px;">共 ${data.length} 筆通知紀錄（最多保留最近 300 筆）</div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>觸發時間</th><th>幣種</th><th>量比</th><th>價格</th></tr></thead>
+          <thead><tr><th>觸發時間</th><th>幣種</th><th>類型</th><th>訊號內容</th><th>價格</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>

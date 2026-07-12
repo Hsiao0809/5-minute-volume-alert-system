@@ -11,6 +11,11 @@ Trigger  : the latest CONFIRM_CANDLES consecutive closed 5m candles must ALL sat
            candle's close price breaks above the high of the RANGE_LOOKBACK closed candles immediately
            preceding it. CONFIRM_CANDLES is currently 1 (single-candle trigger); raise it later to
            require multiple consecutive confirmations if single-candle noise becomes an issue.
+Divergence: independent RSI(14) divergence detector on the same 5m candles. A bullish divergence
+           (底背離) fires when price prints a lower swing-low but RSI prints a higher low; a bearish
+           divergence (頂背離) fires when price prints a higher swing-high but RSI prints a lower
+           high. Swing points are pivot highs/lows confirmed by PIVOT_WINDOW candles on each side,
+           and the first pivot's RSI must be in the oversold/overbought zone to filter weak signals.
 State    : data/volume_history.json persists per-symbol, per-time-slot rolling volume history so
            each run only needs to fetch each symbol's most recent candles (cheap + fast), instead
            of re-downloading days of history every run.
@@ -37,6 +42,22 @@ MIN_TRIGGER_VOLUME_USDT = 3000  # absolute floor on the triggering candle's volu
 CONFIRM_CANDLES = 1          # number of consecutive closed candles that must ALL confirm the trigger
 MAX_WORKERS = 10
 MAX_ALERTS_KEPT = 300        # cap on how many past alerts are kept in the history file
+
+# --- RSI divergence (頂背離/底背離) detection ---
+DIVERGENCE_ENABLED = True
+RSI_PERIOD = 14
+PIVOT_WINDOW = 2             # candles required on EACH side of a swing high/low to confirm the pivot
+DIVERGENCE_LOOKBACK = 60     # recent closed candles scanned for divergence pivots (~5 hours of 5m)
+DIVERGENCE_MIN_GAP = 5       # min candles between the two compared pivots
+DIVERGENCE_MAX_GAP = 40      # max candles between the two compared pivots
+BULL_DIV_RSI_MAX = 40        # first pivot's RSI must be below this for a bullish (bottom) divergence
+BEAR_DIV_RSI_MIN = 60        # first pivot's RSI must be above this for a bearish (top) divergence
+
+# Candle count fetched per symbol: enough for the breakout check AND RSI warmup + divergence scan.
+CANDLES_NEEDED = max(
+    RANGE_LOOKBACK + CONFIRM_CANDLES,
+    DIVERGENCE_LOOKBACK + RSI_PERIOD * 3,  # ~3x period of Wilder-smoothing warmup before the scan window
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "..", "data", "volume_history.json")
@@ -101,13 +122,15 @@ def get_okx_usdt_instruments():
 
 def fetch_candles(inst_id):
     """
-    RANGE_LOOKBACK + CONFIRM_CANDLES closed candles for inst_id, oldest-first.
-    Returns a list of that many candles [open_time_ms, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+    Up to CANDLES_NEEDED closed candles for inst_id, oldest-first.
+    Returns a list of candles [open_time_ms, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
     or None on failure. OKX returns candles newest-first and the first one or two entries may still
-    be unconfirmed (still-forming), so we skip forward to the first confirmed candle.
+    be unconfirmed (still-forming), so we skip forward to the first confirmed candle. Symbols with a
+    short trading history may return fewer than CANDLES_NEEDED candles; the breakout check still
+    needs its minimum, but divergence detection simply skips symbols without enough data.
     """
-    needed = RANGE_LOOKBACK + CONFIRM_CANDLES
-    limit = needed + 3
+    limit = min(CANDLES_NEEDED + 3, 300)  # OKX per-request cap is 300
+    min_needed = RANGE_LOOKBACK + CONFIRM_CANDLES
     for attempt in range(2):
         try:
             r = SESSION.get(
@@ -124,20 +147,104 @@ def fetch_candles(inst_id):
             if payload.get("code") != "0":
                 return None
             data = payload.get("data", [])
-            if len(data) < limit:
-                return None
             # data[0] = newest; skip any still-forming (confirm == "0") candles
             start = 0
             while start < len(data) and data[start][8] == "0":
                 start += 1
-            closed = data[start:start + needed]
-            if len(closed) < needed:
+            closed = data[start:start + CANDLES_NEEDED]
+            if len(closed) < min_needed:
                 return None
             closed.reverse()  # oldest-first: closed[-1] is the latest closed candle
             return closed
         except (requests.RequestException, IndexError, ValueError):
             time.sleep(1)
     return None
+
+
+def compute_rsi(closes, period=RSI_PERIOD):
+    """Wilder-smoothed RSI. Returns a list aligned with closes (None before warmup), or None if too short."""
+    if len(closes) < period + 1:
+        return None
+    rsi = [None] * len(closes)
+    gains = 0.0
+    losses = 0.0
+    for i in range(1, period + 1):
+        d = closes[i] - closes[i - 1]
+        gains += max(d, 0.0)
+        losses += max(-d, 0.0)
+    avg_gain = gains / period
+    avg_loss = losses / period
+    rsi[period] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    for i in range(period + 1, len(closes)):
+        d = closes[i] - closes[i - 1]
+        avg_gain = (avg_gain * (period - 1) + max(d, 0.0)) / period
+        avg_loss = (avg_loss * (period - 1) + max(-d, 0.0)) / period
+        rsi[i] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    return rsi
+
+
+def find_pivots(values, window, is_low):
+    """Indices of swing lows (is_low) or swing highs: extreme within +/- window candles."""
+    pivots = []
+    for i in range(window, len(values) - window):
+        segment = values[i - window:i + window + 1]
+        if (is_low and values[i] == min(segment)) or (not is_low and values[i] == max(segment)):
+            pivots.append(i)
+    return pivots
+
+
+def detect_divergence(candles):
+    """
+    RSI divergence on oldest-first candles. A signal only fires when the newest closed candle is the
+    one that just confirmed a new pivot (pivot index == len - 1 - PIVOT_WINDOW), so each divergence
+    is reported exactly once, PIVOT_WINDOW candles after the actual swing point.
+
+    bullish (底背離): price makes a lower low but RSI makes a higher low (first pivot RSI oversold-ish)
+    bearish (頂背離): price makes a higher high but RSI makes a lower high (first pivot RSI overbought-ish)
+    Returns a list of signal dicts (0-2 entries).
+    """
+    closes = [float(c[4]) for c in candles]
+    rsi = compute_rsi(closes)
+    if rsi is None:
+        return []
+    n = len(candles)
+    confirm_idx = n - 1 - PIVOT_WINDOW
+    scan_start = max(RSI_PERIOD + 1, n - DIVERGENCE_LOOKBACK)
+    if confirm_idx <= scan_start:
+        return []
+
+    signals = []
+    for is_low, div_type, extreme_ok in (
+        (True, "bullish_divergence", lambda r: r < BULL_DIV_RSI_MAX),
+        (False, "bearish_divergence", lambda r: r > BEAR_DIV_RSI_MIN),
+    ):
+        series = [float(c[3]) for c in candles] if is_low else [float(c[2]) for c in candles]
+        pivots = [i for i in find_pivots(series, PIVOT_WINDOW, is_low) if i >= scan_start]
+        if len(pivots) < 2 or pivots[-1] != confirm_idx:
+            continue
+        p2 = pivots[-1]
+        p1 = pivots[-2]
+        gap = p2 - p1
+        if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
+            continue
+        if not extreme_ok(rsi[p1]):
+            continue
+        if is_low:
+            diverged = series[p2] < series[p1] and rsi[p2] > rsi[p1]
+        else:
+            diverged = series[p2] > series[p1] and rsi[p2] < rsi[p1]
+        if diverged:
+            signals.append({
+                "type": div_type,
+                "price1": series[p1],
+                "price2": series[p2],
+                "rsi1": rsi[p1],
+                "rsi2": rsi[p2],
+                "pivot_time": int(candles[p2][0]),
+                "close": closes[-1],
+                "gap_candles": gap,
+            })
+    return signals
 
 
 def slot_index(open_time_ms):
@@ -199,7 +306,7 @@ def send_telegram(text):
 def process_symbol(symbol, meta, state):
     candles = fetch_candles(symbol)
     if not candles:
-        return None, None
+        return None, [], None
 
     # oldest-first, length RANGE_LOOKBACK + CONFIRM_CANDLES.
     # The last CONFIRM_CANDLES entries are the "confirmation window": each one needs its own
@@ -267,6 +374,24 @@ def process_symbol(symbol, meta, state):
                 "confirm_candles": CONFIRM_CANDLES,
             }
 
+    div_alerts = []
+    if DIVERGENCE_ENABLED and not already_seen:
+        last_div = sym_state.get("last_divergence", {})
+        for sig in detect_divergence(candles):
+            # dedupe on the confirming pivot's candle time, per divergence type
+            if sig["pivot_time"] <= last_div.get(sig["type"], 0):
+                continue
+            last_div[sig["type"]] = sig["pivot_time"]
+            div_alerts.append({
+                "symbol": symbol,
+                "name": meta["name"],
+                "rank": meta["rank"],
+                "candle_time": datetime.fromtimestamp(sig["pivot_time"] / 1000, tz=timezone.utc).isoformat(),
+                **sig,
+            })
+        if last_div:
+            sym_state["last_divergence"] = last_div
+
     if not already_seen:
         # Only the newest candle is new data; older candles in the confirm window were already
         # appended to their own slot's history in a previous run.
@@ -279,7 +404,7 @@ def process_symbol(symbol, meta, state):
         sym_state.setdefault("slots", {})[newest_slot] = history
         sym_state["last_open_time"] = newest_open_time
 
-    return alert, sym_state
+    return alert, div_alerts, sym_state
 
 
 def main():
@@ -300,16 +425,18 @@ def main():
 
     state = load_state()
     alerts = []
+    div_alerts = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(process_symbol, sym, meta, state): sym for sym, meta in targets}
         for fut in as_completed(futures):
             sym = futures[fut]
-            alert, sym_state = fut.result()
+            alert, sym_divs, sym_state = fut.result()
             if sym_state is not None:
                 state[sym] = sym_state
             if alert:
                 alerts.append(alert)
+            div_alerts.extend(sym_divs)
 
     save_state(state)
 
@@ -343,7 +470,45 @@ def main():
             })
         save_alerts_history(alerts_history)
     else:
-        print("No alerts this run.")
+        print("No volume alerts this run.")
+
+    if div_alerts:
+        lines = ["\U0001F4C8\U0001F4C9 <b>5分鐘 RSI 背離警報</b>"]
+        for a in sorted(div_alerts, key=lambda x: (x["type"], x["rank"])):
+            if a["type"] == "bullish_divergence":
+                label = "\U0001F4C8 底背離"
+                price_note = f"價格創新低 {a['price1']:.6g} → {a['price2']:.6g}，RSI 走高 {a['rsi1']:.1f} → {a['rsi2']:.1f}"
+            else:
+                label = "\U0001F4C9 頂背離"
+                price_note = f"價格創新高 {a['price1']:.6g} → {a['price2']:.6g}，RSI 走低 {a['rsi1']:.1f} → {a['rsi2']:.1f}"
+            lines.append(
+                f"\n{label} #{a['rank']} <b>{a['symbol']}</b> ({a['name']})\n"
+                f"{price_note}\n"
+                f"現價 {a['close']:.6g}（兩個轉折點相隔 {a['gap_candles']} 根5分K）"
+            )
+        send_telegram("\n".join(lines))
+        print(f"Sent divergence alert for {len(div_alerts)} signal(s).")
+
+        detected_at = datetime.now(timezone.utc).isoformat()
+        alerts_history = load_alerts_history()
+        for a in sorted(div_alerts, key=lambda x: (x["type"], x["rank"])):
+            alerts_history.append({
+                "detected_at": detected_at,
+                "candle_time": a["candle_time"],
+                "type": a["type"],
+                "symbol": a["symbol"],
+                "name": a["name"],
+                "rank": a["rank"],
+                "close": a["close"],
+                "price1": a["price1"],
+                "price2": a["price2"],
+                "rsi1": a["rsi1"],
+                "rsi2": a["rsi2"],
+                "gap_candles": a["gap_candles"],
+            })
+        save_alerts_history(alerts_history)
+    else:
+        print("No divergence alerts this run.")
 
 
 if __name__ == "__main__":
