@@ -50,8 +50,8 @@ PIVOT_WINDOW = 2             # candles required on EACH side of a swing high/low
 DIVERGENCE_LOOKBACK = 60     # recent closed candles scanned for divergence pivots (~5 hours of 5m)
 DIVERGENCE_MIN_GAP = 5       # min candles between the two compared pivots
 DIVERGENCE_MAX_GAP = 40      # max candles between the two compared pivots
-BULL_DIV_RSI_MAX = 40        # first pivot's RSI must be below this for a bullish (bottom) divergence
-BEAR_DIV_RSI_MIN = 60        # first pivot's RSI must be above this for a bearish (top) divergence
+BULL_DIV_RSI_MAX = 30        # first pivot's RSI must be below this for a bullish (bottom) divergence
+BEAR_DIV_RSI_MIN = 80        # first pivot's RSI must be above this for a bearish (top) divergence
 
 # Candle count fetched per symbol: enough for the breakout check AND RSI warmup + divergence scan.
 CANDLES_NEEDED = max(
