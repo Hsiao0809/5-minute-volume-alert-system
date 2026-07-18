@@ -16,6 +16,9 @@ Divergence: independent RSI(14) divergence detector on the same 5m candles. A bu
            divergence (頂背離) fires when price prints a higher swing-high but RSI prints a lower
            high. Swing points are pivot highs/lows confirmed by PIVOT_WINDOW candles on each side,
            and the first pivot's RSI must be in the oversold/overbought zone to filter weak signals.
+           When DIVERGENCE_REQUIRE_VOLUME_SPIKE is on, a divergence only alerts if the swing candle
+           (or its confirmation candles) also shows a volume spike, so it fires only on coins that
+           are actually seeing volume — not on quiet drift.
 State    : data/volume_history.json persists per-symbol, per-time-slot rolling volume history so
            each run only needs to fetch each symbol's most recent candles (cheap + fast), instead
            of re-downloading days of history every run.
@@ -52,6 +55,11 @@ DIVERGENCE_MIN_GAP = 5       # min candles between the two compared pivots
 DIVERGENCE_MAX_GAP = 40      # max candles between the two compared pivots
 BULL_DIV_RSI_MAX = 30        # first pivot's RSI must be below this for a bullish (bottom) divergence
 BEAR_DIV_RSI_MIN = 80        # first pivot's RSI must be above this for a bearish (top) divergence
+# Only send a divergence alert if the swing candle (or its confirmation candles) also shows a volume
+# spike (same volume test as the breakout alert: vol > VOLUME_MULTIPLIER x same-slot baseline AND
+# vol > MIN_TRIGGER_VOLUME_USDT). The price-breakout part is NOT required (a top divergence rarely
+# coincides with an upside breakout). Set False to alert on every divergence regardless of volume.
+DIVERGENCE_REQUIRE_VOLUME_SPIKE = True
 
 # Candle count fetched per symbol: enough for the breakout check AND RSI warmup + divergence scan.
 CANDLES_NEEDED = max(
@@ -243,6 +251,7 @@ def detect_divergence(candles):
                 "pivot_time": int(candles[p2][0]),
                 "close": closes[-1],
                 "gap_candles": gap,
+                "p2_idx": p2,
             })
     return signals
 
@@ -250,6 +259,18 @@ def detect_divergence(candles):
 def slot_index(open_time_ms):
     minute_of_day = (open_time_ms // 60000) % 1440
     return int(minute_of_day // 5)
+
+
+def candle_has_volume_spike(candle, sym_state):
+    """True if this candle's USDT volume spikes vs its same-time-of-day baseline (same test the
+    breakout alert uses, minus the price-breakout requirement). Needs enough slot history."""
+    slot = str(slot_index(int(candle[0])))
+    hist = sym_state.get("slots", {}).get(slot, [])
+    if len(hist) < MIN_HISTORY_SAMPLES:
+        return False
+    avg_vol = statistics.mean(hist)
+    vol = float(candle[6])  # volCcy: volume denominated in USDT
+    return avg_vol > 0 and vol > VOLUME_MULTIPLIER * avg_vol and vol > MIN_TRIGGER_VOLUME_USDT
 
 
 def load_state():
@@ -381,7 +402,14 @@ def process_symbol(symbol, meta, state):
             # dedupe on the confirming pivot's candle time, per divergence type
             if sig["pivot_time"] <= last_div.get(sig["type"], 0):
                 continue
+            # only alert if the swing candle (p2) through the newest confirmation candle shows a
+            # volume spike, so divergences without volume behind them stay silent
+            if DIVERGENCE_REQUIRE_VOLUME_SPIKE:
+                window = candles[sig["p2_idx"]:]
+                if not any(candle_has_volume_spike(c, sym_state) for c in window):
+                    continue
             last_div[sig["type"]] = sig["pivot_time"]
+            sig.pop("p2_idx", None)  # internal index, not part of the alert payload
             div_alerts.append({
                 "symbol": symbol,
                 "name": meta["name"],

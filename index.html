@@ -118,7 +118,7 @@
       幣種池：市值排名 <code>200–500</code>（比對 OKX USDT 現貨交易對）<br>
       觸發條件：現量 &gt; 過去7天同時段均值 <code>15</code> 倍，且現量 &gt; <code>3,000</code> USDT（絕對量下限，避免冷門幣雜訊觸發），且現價突破近 <code>20</code> 根 5分K高點<br>
       基準樣本：需至少 <code>5</code> 天同時段歷史資料才開始判斷<br>
-      RSI 背離：RSI(<code>14</code>) 搭配左右各 <code>2</code> 根K確認的轉折點；底背離需前一低點 RSI &lt; <code>30</code>、頂背離需前一高點 RSI &gt; <code>80</code>，兩轉折點相隔 <code>5–40</code> 根5分K<br>
+      RSI 背離：RSI(<code>14</code>) 搭配左右各 <code>2</code> 根K確認的轉折點；底背離需前一低點 RSI &lt; <code>30</code>、頂背離需前一高點 RSI &gt; <code>80</code>，兩轉折點相隔 <code>5–40</code> 根5分K，且轉折點附近須同時<code>成交量爆量</code>（量能條件同上，不需價格突破）才發送<br>
       通知：Telegram Bot（觸發時發送）<br>
       <a href="https://github.com/Hsiao0809/5-minute-volume-alert-system/blob/main/scripts/volume_alert.py" target="_blank">在 GitHub 上查看 / 調整腳本 →</a>
     </div>
